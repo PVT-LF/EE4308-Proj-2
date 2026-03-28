@@ -66,17 +66,39 @@ namespace ee4308::drone
         // waypoint_x_, waypoint_y_, waypoint_z_
         // ==== ====
 
-        if (1)  // change the 1: if (reached waypoint)
+        if (reachedWaypoint_())
         {
             if (state_ == TAKEOFF)
             {
+                transition_(TURTLE_POSITION);
+            }
+            else if (state_ == INITIAL)
+            {
+                transition_(turtle_stop_ ? LANDING : TURTLE_POSITION);
+            }
+            else if (state_ == TURTLE_POSITION)
+            {
+                transition_(TURTLE_WAYPOINT);
+            }
+            else if (state_ == TURTLE_WAYPOINT)
+            {
                 transition_(INITIAL);
             }
-            // ...
+            else if (state_ == LANDING)
+            {
+                transition_(END);
+            }
         }
 
         // request a plan with requestPlan(). This is done every time cbTimer() is called.
-        // ...
+        if (state_ != END)
+        {
+            requestPlan_(
+                odom_.pose.pose.position.x,
+                odom_.pose.pose.position.y,
+                odom_.pose.pose.position.z,
+                waypoint_x_, waypoint_y_, waypoint_z_);
+        }
     }
 
     void Behavior::transition_(int new_state)
@@ -106,6 +128,38 @@ namespace ee4308::drone
             // set the waypoint.
             setWaypoint_(initial_x_, initial_y_, cruise_height_);
         }
+        else if (state_ == INITIAL)
+        {
+            setWaypoint_(initial_x_, initial_y_, cruise_height_);
+        }
+        else if (state_ == TURTLE_POSITION)
+        {
+            if (!turtle_plan_.poses.empty())
+            {
+                const auto &pos = turtle_plan_.poses.front().pose.position;
+                setWaypoint_(pos.x, pos.y, cruise_height_);
+            }
+            else
+            {
+                setWaypoint_(initial_x_, initial_y_, cruise_height_);
+            }
+        }
+        else if (state_ == TURTLE_WAYPOINT)
+        {
+            if (!turtle_plan_.poses.empty())
+            {
+                const auto &goal = turtle_plan_.poses.back().pose.position;
+                setWaypoint_(goal.x, goal.y, cruise_height_);
+            }
+            else
+            {
+                setWaypoint_(initial_x_, initial_y_, cruise_height_);
+            }
+        }
+        else if (state_ == LANDING)
+        {
+            setWaypoint_(initial_x_, initial_y_, initial_z_);
+        }
         else if (state_ == END)
         {
             // turn off the robot
@@ -127,10 +181,9 @@ namespace ee4308::drone
         // waypoint_x, waypoint_y, waypoint_z
         // =========
         
-        // remove or rewrite the following
-        (void) waypoint_x; // remove or .
-        (void) waypoint_y; // write to private class property.
-        (void) waypoint_z; // write to private class property.
+        waypoint_x_ = waypoint_x;
+        waypoint_y_ = waypoint_y;
+        waypoint_z_ = waypoint_z;
     }
 
     bool Behavior::reachedWaypoint_()
@@ -138,8 +191,11 @@ namespace ee4308::drone
         // you may choose to not use this function.
         // returns true if the current waypoint is reached.
         
-        // remove or rewrite the following.
-        return true;
+        double dx = waypoint_x_ - odom_.pose.pose.position.x;
+        double dy = waypoint_y_ - odom_.pose.pose.position.y;
+        double dz = waypoint_z_ - odom_.pose.pose.position.z;
+        double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        return distance <= reached_thres_;
     }
 
     void Behavior::requestPlan_(double drone_x, double drone_y, double drone_z,
