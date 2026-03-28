@@ -82,16 +82,20 @@ namespace ee4308::drone
         // all the function arguments.
         // =========
 
-        // rewrite or delete the following
-        (void) (sin_lat * cos_lat * sin_lon * cos_lon * alt);
+        double a = RAD_EQUATOR;
+        double b = RAD_POLAR;
+        double e2 = 1.0 - (b * b) / (a * a);
+        double N = a / std::sqrt(1.0 - e2 * sin_lat * sin_lat);
+
+        ECEF(0) = (N + alt) * cos_lat * cos_lon;
+        ECEF(1) = (N + alt) * cos_lat * sin_lon;
+        ECEF(2) = ((b * b) / (a * a) * N + alt) * sin_lat;
 
         return ECEF;
     }
 
     void Estimator::callbackSubGPS_(const sensor_msgs::msg::NavSatFix msg)
     { // avoiding const & due to possibly long calcs.
-        (void)msg;
-
         constexpr double DEG2RAD = M_PI / 180;
         double lat = msg.latitude * DEG2RAD;  
         double lon = msg.longitude * DEG2RAD; 
@@ -129,8 +133,58 @@ namespace ee4308::drone
         // - Matrix multiplication using the times operator '*'.
         // =========
 
-        // rewrite or delete the following
-        (void) ECEF;
+        Eigen::Matrix3d Re_n;
+        Re_n << -sin_lat * cos_lon, -sin_lon, -cos_lat * cos_lon,
+            -sin_lat * sin_lon, cos_lon, -cos_lat * sin_lon,
+            cos_lat, 0.0, -sin_lat;
+        Eigen::Vector3d NED = Re_n.transpose() * (ECEF - initial_ECEF_);
+
+        Eigen::Matrix3d Rm_n;
+        Rm_n << 0.0, 1.0, 0.0,
+            1.0, 0.0, 0.0,
+            0.0, 0.0, -1.0;
+        Ygps_ = Rm_n * NED + initial_position_;
+
+        Eigen::Vector2d H{1.0, 0.0};
+        double V = 1.0;
+
+        Eigen::Vector2d Kx = Px_ * H /
+            (H.transpose() * Px_ * H + V * var_gps_x_ * V);
+        Eigen::Vector2d Xx_newposterior = Xx_ + Kx * (Ygps_(0) - H.transpose() * Xx_);
+        Eigen::Matrix2d Px_newposterior = Px_ - Kx * H.transpose() * Px_;
+
+        Eigen::Vector2d Ky = Py_ * H /
+            (H.transpose() * Py_ * H + V * var_gps_y_ * V);
+        Eigen::Vector2d Xy_newposterior = Xy_ + Ky * (Ygps_(1) - H.transpose() * Xy_);
+        Eigen::Matrix2d Py_newposterior = Py_ - Ky * H.transpose() * Py_;
+
+        Eigen::Vector2d Kz = Pz_ * H /
+            (H.transpose() * Pz_ * H + V * var_gps_z_ * V);
+        Eigen::Vector2d Xz_newposterior = Xz_ + Kz * (Ygps_(2) - H.transpose() * Xz_);
+        Eigen::Matrix2d Pz_newposterior = Pz_ - Kz * H.transpose() * Pz_;
+
+        bool unsafe_value = (Xx_newposterior.array() > 1000000000).any() ||
+            (Xx_newposterior.array() < -1000000000).any() ||
+            (Xy_newposterior.array() > 1000000000).any() ||
+            (Xy_newposterior.array() < -1000000000).any() ||
+            (Xz_newposterior.array() > 1000000000).any() ||
+            (Xz_newposterior.array() < -1000000000).any() ||
+            (Px_newposterior.array() > 1000000000).any() ||
+            (Px_newposterior.array() < -1000000000).any() ||
+            (Py_newposterior.array() > 1000000000).any() ||
+            (Py_newposterior.array() < -1000000000).any() ||
+            (Pz_newposterior.array() > 1000000000).any() ||
+            (Pz_newposterior.array() < -1000000000).any();
+
+        if (!unsafe_value)
+        {
+            Xx_ = Xx_newposterior;
+            Xy_ = Xy_newposterior;
+            Xz_ = Xz_newposterior;
+            Px_ = Px_newposterior;
+            Py_ = Py_newposterior;
+            Pz_ = Pz_newposterior;
+        }
     }
 
     // ================================ Sonar sub callback / EKF Correction ========================================
