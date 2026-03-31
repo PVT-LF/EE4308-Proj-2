@@ -1,5 +1,8 @@
 #include "ee4308_drone/controller.hpp"
 
+#include <algorithm>
+#include <limits>
+
 namespace ee4308::drone
 {
     Controller::Controller(
@@ -43,21 +46,80 @@ namespace ee4308::drone
 
     void Controller::callbackTimer_()
     {
-        if (!enable_)
-            return;
+        if (!enable_) return;
 
-        if (!this->received_odom_)
-        {
-            publishCmdVel_(0, 0, 0, 0);
+        // Hover if no odom or no plan
+        if (!received_odom_ || plan_.poses.empty()) {
+            publishCmdVel_(0.0, 0.0, 0.0, 0.0);
             return;
         }
 
-        if (plan_.poses.empty())
-        {
-            // RCLCPP_WARN_STREAM(this->get_logger(), "No path published");
-            publishCmdVel_(0, 0, 0, 0);
-            return;
+        // Current drone position in world frame
+        const auto &pos = odom_.pose.pose.position;
+        const double x = pos.x;
+        const double y = pos.y;
+        const double z = pos.z;
+
+        // 1) Find closest point on path in x-y plane
+        size_t closest_idx = 0;
+        double closest_dist = std::numeric_limits<double>::infinity();
+
+        for (size_t i = 0; i < plan_.poses.size(); ++i) {
+            const auto &p = plan_.poses[i].pose.position;
+            const double d = std::hypot(p.x - x, p.y - y);
+            if (d < closest_dist) {
+                closest_dist = d;
+                closest_idx = i;
+            }
         }
+
+        // 2) Search forward for lookahead point
+        // Use first point whose x-y distance is >= lookahead_distance_
+        // If not found, use the last path point
+        size_t lookahead_idx = plan_.poses.size() - 1;
+        for (size_t i = closest_idx; i < plan_.poses.size(); ++i) {
+            const auto &p = plan_.poses[i].pose.position;
+            const double d = std::hypot(p.x - x, p.y - y);
+            if (d >= lookahead_distance_) {
+                lookahead_idx = i;
+                break;
+            }
+        }
+
+        const auto &target = plan_.poses[lookahead_idx].pose.position;
+
+        // 3) Compute error to target
+        const double dx_world = target.x - x;
+        const double dy_world = target.y - y;
+        const double dz_world = target.z - z;
+
+        // Convert x/y error from world frame to drone body frame
+        const double yaw = ee4308::getYawFromQuaternion(odom_.pose.pose.orientation);
+        const double cy = std::cos(yaw);
+        const double sy = std::sin(yaw);
+
+        const double dx_body =  cy * dx_world + sy * dy_world;
+        const double dy_body = -sy * dx_world + cy * dy_world;
+
+        // Proportional control
+        double x_vel = kp_xy_ * dx_body;
+        double y_vel = kp_xy_ * dy_body;
+        double z_vel = kp_z_ * dz_world;
+
+        // 4) Clamp horizontal velocity magnitude
+        const double xy_speed = std::hypot(x_vel, y_vel);
+        if (xy_speed > max_xy_vel_ && xy_speed > 1e-9) {
+            const double scale = max_xy_vel_ / xy_speed;
+            x_vel *= scale;
+            y_vel *= scale;
+        }
+
+        // Clamp vertical velocity
+        z_vel = std::clamp(z_vel, -max_z_vel_, max_z_vel_);
+
+        // 5) Publish body-frame velocity command and yaw velocity
+        publishCmdVel_(x_vel, y_vel, z_vel, yaw_vel_);
+    }
 
         // ==== make use of ====
         // plan_.poses
@@ -76,8 +138,6 @@ namespace ee4308::drone
         // =========
 
         // publish
-        publishCmdVel_(0, 0, 0, 0);
-    }
 
     // ================================  PUBLISHING ========================================
     void Controller::publishCmdVel_(double x_vel, double y_vel, double z_vel, double yaw_vel)
