@@ -267,7 +267,7 @@ namespace ee4308::drone
         double V = 1.0;
         double R = this->var_magnet_; // variance
         // calculate heading
-        double Ya_ = ee4308::limitAngle(std::atan2(msg.magnetic_field.y, msg.magnetic_field.x)); // radians
+        double Ya_ = -ee4308::limitAngle(std::atan2(msg.magnetic_field.y, msg.magnetic_field.x)); // radians
         // update Xa_, Pa_
         Eigen::Vector2d Ka_ = this->Pa_ * H / 
                 (H.transpose() * this->Pa_ * H + V * R * V); // 2x1 Kz_

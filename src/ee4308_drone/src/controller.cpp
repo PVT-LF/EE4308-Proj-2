@@ -118,7 +118,8 @@ namespace ee4308::drone
         z_vel = std::clamp(z_vel, -max_z_vel_, max_z_vel_);
 
         // 5) Publish body-frame velocity command and yaw velocity
-        publishCmdVel_(x_vel, y_vel, z_vel, yaw_vel_);
+        double yaw_fixed = -30.0 / 180.0 * 3.14159265; // rad/s
+        publishCmdVel_(x_vel, y_vel, z_vel, yaw_fixed);
     }
 
         // ==== make use of ====

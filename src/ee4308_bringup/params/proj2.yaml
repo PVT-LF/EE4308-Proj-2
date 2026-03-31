@@ -15,9 +15,9 @@ drone:
       max_xy_vel: 1.0
       max_z_vel: 1.0
       yaw_vel: 0.0
-      kp_xy: 1.0
-      kp_z: 1.0
-      frequency: 20.0
+      kp_xy: 0.5
+      kp_z: 0.5
+      frequency: 120.0
       enable: true
       use_sim_time: true 
 
@@ -40,6 +40,7 @@ drone:
       var_magnet: 0.2
       use_sim_time: true
       use_ground_truth: false
+      # use_ground_truth: true
       verbose: true
       # initial_x: -2.0 # overwritten by launch file
       # initial_y: -2.0 # overwritten by launch file
